@@ -1,0 +1,10 @@
+.git
+.raggie
+.venv
+__pycache__/
+*.py[cod]
+.pytest_cache/
+data
+.env
+tests/
+docs/
