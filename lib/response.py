@@ -1,10 +1,8 @@
 from logs import logger
 
-
-from fastapi import HTTPException
 from errors import ErrorCodes
 from lib.http_errors import GenerateErrorResponses
-
+from starlette.responses import JSONResponse
 
 
 errors_map = GenerateErrorResponses(ErrorCodes)
@@ -21,12 +19,14 @@ class StandardResponse:
         self.data = data
 
     def success(self):
-        return { 
-            "detail": {
-                "message": self.msg,
+        return JSONResponse(
+            content= {
+                "detail": self.msg,
                 "data": self.data
-            }
-        }
+            },
+            status_code = 200 if self.msg != "ok" else 201
+        )
+        
 
     def logInfo(self, action_name:str , msg: str, info=None):
         logger.Info( action_name, msg = msg, info=info )
@@ -40,13 +40,30 @@ class StandardResponse:
             error_obj = errors_map.get("default")
             self.msg = "interal_error" # create a new label to avoid exposing data
 
-        raise HTTPException(
+        return JSONResponse (
             status_code = error_obj.code,
-            detail = {
+            content = {
                 "errcode": self.msg,
-                "message": error_obj.msg
+                "detail": error_obj.msg
             }
         )
+
+    def critical(self, action_name:str, err):
+        logger.critical( action_name, error = str(err), info=self.data )
+
+        error_obj = errors_map.get(self.msg)
+        if error_obj is None:
+            error_obj = errors_map.get("default")
+            self.msg = "interal_error" # create a new label to avoid exposing data
+
+        return JSONResponse (
+            status_code = error_obj.code,
+            content = {
+                "errcode": self.msg,
+                "detail": error_obj.msg
+            }
+        )
+
 
     def nolog_error(self):
         error_obj = errors_map.get(self.msg)
@@ -54,11 +71,11 @@ class StandardResponse:
             error_obj = errors_map.get("default")
             self.msg = "interal_error" # create a new label to avoid exposing data
 
-        raise HTTPException(
+        return JSONResponse(
             status_code = error_obj.code,
-            detail = {
+            content = {
                 "errcode": self.msg,
-                "message": error_obj.msg
+                "detail": error_obj.msg
             }
         )
 

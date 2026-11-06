@@ -1,5 +1,8 @@
-import handlers.index
+import middleware
+
+from . import index
 
 
 def attach(app):
-    app.include_router(handlers.index.router)
+    middleware.attach(app)
+    app.include_router(index.router)
