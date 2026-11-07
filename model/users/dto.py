@@ -1,5 +1,6 @@
-"""Request models for the configurable auth flows."""
+"""Request and response models for the users module."""
 
+from datetime import datetime
 from typing import Annotated, Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -88,3 +89,22 @@ class OtpLogin(OtpRequest):
     """OTP login adds the six digit code."""
 
     code: str = Field(min_length=6, max_length=6, pattern=r"^\d{6}$")
+
+
+class UserOut(BaseModel):
+    """The public shape of a user. Only these fields ever reach a client."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id_: int
+    username: str | None
+    phone_number: str | None
+    email: str | None
+    role: str
+    created_at: datetime | None
+
+
+class UserListItemOut(UserOut):
+    """Admin listing adds the disabled flag."""
+
+    isdisabled: bool

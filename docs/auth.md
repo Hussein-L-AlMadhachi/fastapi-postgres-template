@@ -70,11 +70,14 @@ rejected once `OTP_TTL_MINUTES` has passed.
 
 ### GET /api/users/me
 
-Requires a bearer token. Returns the current user row.
+Requires a bearer token. Returns `id_`, `username`, `phone_number`, `email`,
+`role` and `created_at`. Sensitive columns are never part of the response
+model.
 
 ### GET /api/users
 
-Requires a bearer token whose `role` claim is `admin`. Returns active users.
+Requires a bearer token whose `role` claim is `admin`. Returns active users
+with the same fields plus `isdisabled`.
 
 ## Errors
 
