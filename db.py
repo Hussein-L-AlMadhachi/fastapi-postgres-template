@@ -1,13 +1,3 @@
-"""Async Postgres pool lifecycle.
-
-There is no query layer here. Queries live in ``queries/*.sql`` and become
-functions in ``generated/`` after ``sqlc generate``; those functions take a
-connection. Handlers borrow one connection per request with ``Depends(get_db)``
-and pass it straight to the generated function.
-
-The pool is created lazily and shared: the app lifespan opens it once, and every
-request borrows a connection from it.
-"""
 
 import asyncio
 from collections.abc import AsyncGenerator

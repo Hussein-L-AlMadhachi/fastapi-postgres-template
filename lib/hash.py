@@ -15,6 +15,5 @@ def hash_password(password: str) -> str:
 def verify_password(password: str, password_hash: str) -> bool:
     try:
         return ph.verify(password_hash, password)
-    except argon2.exceptions.VerifyMismatchError:
+    except (argon2.exceptions.VerificationError, argon2.exceptions.InvalidHashError):
         return False
-

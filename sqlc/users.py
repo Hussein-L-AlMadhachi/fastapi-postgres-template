@@ -12,6 +12,8 @@ __all__: collections.abc.Sequence[str] = (
     "GetUserRow",
     "ListUsersRow",
     "QueryResults",
+    "clear_otp_by_email",
+    "clear_otp_by_phone_number",
     "create_user",
     "get_user",
     "get_user_by_email",
@@ -39,16 +41,20 @@ if typing.TYPE_CHECKING:
 @dataclasses.dataclass()
 class GetUserRow:
     id_: int
-    email: str
+    username: str | None
+    phone_number: str | None
+    email: str | None
+    role: str
     created_at: datetime.datetime | None
 
 
 @dataclasses.dataclass()
 class ListUsersRow:
     id_: int
-    username: str
-    phone_number: str
-    email: str
+    username: str | None
+    phone_number: str | None
+    email: str | None
+    role: str
     created_at: datetime.datetime | None
     isdisabled: bool
 
@@ -56,10 +62,11 @@ class ListUsersRow:
 @dataclasses.dataclass()
 class GetUserByUsernameRow:
     id_: int
-    username: str
-    phone_number: str
-    email: str
+    username: str | None
+    phone_number: str | None
+    email: str | None
     password_hash: str | None
+    role: str
     isdisabled: bool
     deleted_at: datetime.datetime | None
 
@@ -67,9 +74,13 @@ class GetUserByUsernameRow:
 @dataclasses.dataclass()
 class GetUserByEmailRow:
     id_: int
-    username: str
-    phone_number: str
-    email: str
+    username: str | None
+    phone_number: str | None
+    email: str | None
+    password_hash: str | None
+    role: str
+    isdisabled: bool
+    deleted_at: datetime.datetime | None
     otp: str | None
     otp_expires_at: datetime.datetime | None
 
@@ -77,54 +88,59 @@ class GetUserByEmailRow:
 @dataclasses.dataclass()
 class GetUserByPhoneNumberRow:
     id_: int
-    username: str
-    phone_number: str
-    email: str
+    username: str | None
+    phone_number: str | None
+    email: str | None
+    password_hash: str | None
+    role: str
+    isdisabled: bool
+    deleted_at: datetime.datetime | None
     otp: str | None
     otp_expires_at: datetime.datetime | None
 
 
 GET_USER: typing.Final[str] = """-- name: GetUser :one
-SELECT id, email, created_at
+SELECT id, username, phone_number, email, role, created_at
 FROM users
 WHERE id = $1
+    AND isdisabled = false
+    AND deleted_at IS NULL
 """
 
 LIST_USERS: typing.Final[str] = """-- name: ListUsers :many
-SELECT id, username, phone_number, email, created_at, isdisabled
+SELECT id, username, phone_number, email, role, created_at, isdisabled
 FROM users
-where isdisabled <> false
-    AND isdisabled
-    AND deleted_at IS NOT NULL
-ORDER BY username
+WHERE isdisabled = false
+    AND deleted_at IS NULL
+ORDER BY username NULLS LAST
 """
 
 GET_USER_BY_USERNAME: typing.Final[str] = """-- name: GetUserByUsername :one
-SELECT id, username, phone_number, email, password_hash, isdisabled, deleted_at
+SELECT id, username, phone_number, email, password_hash, role, isdisabled, deleted_at
 FROM users
 WHERE username = $1
-    AND isdisabled
-    AND deleted_at IS NOT NULL
+    AND isdisabled = false
+    AND deleted_at IS NULL
 """
 
 GET_USER_BY_EMAIL: typing.Final[str] = """-- name: GetUserByEmail :one
-SELECT id, username, phone_number, email, otp, otp_expires_at
+SELECT id, username, phone_number, email, password_hash, role, isdisabled, deleted_at, otp, otp_expires_at
 FROM users
 WHERE email = $1
-    AND isdisabled
-    AND deleted_at IS NOT NULL
+    AND isdisabled = false
+    AND deleted_at IS NULL
 """
 
 GET_USER_BY_PHONE_NUMBER: typing.Final[str] = """-- name: GetUserByPhoneNumber :one
-SELECT id, username, phone_number, email, otp, otp_expires_at
+SELECT id, username, phone_number, email, password_hash, role, isdisabled, deleted_at, otp, otp_expires_at
 FROM users
 WHERE phone_number = $1
-    AND isdisabled
-    AND deleted_at IS NOT NULL
+    AND isdisabled = false
+    AND deleted_at IS NULL
 """
 
 CREATE_USER: typing.Final[str] = """-- name: CreateUser :one
-INSERT INTO users (id, username, phone_number, email, password_hash)
+INSERT INTO users (username, phone_number, email, password_hash, role)
 VALUES (
     $1,
     $2,
@@ -137,18 +153,34 @@ RETURNING id
 
 SET_OTP_BY_EMAIL: typing.Final[str] = """-- name: SetOtpByEmail :exec
 UPDATE users
-SET otp = $1, otp_expires_at = $2
+SET otp = $1, otp_expires_at = $2, updated_at = now()
 WHERE email = $3
-    AND isdisabled
-    AND deleted_at IS NOT NULL
+    AND isdisabled = false
+    AND deleted_at IS NULL
 """
 
 SET_OTP_BY_PHONE_NUMBER: typing.Final[str] = """-- name: SetOtpByPhoneNumber :exec
 UPDATE users
-SET otp = $1, otp_expires_at = $2
+SET otp = $1, otp_expires_at = $2, updated_at = now()
 WHERE phone_number = $3
-    AND isdisabled
-    AND deleted_at IS NOT NULL
+    AND isdisabled = false
+    AND deleted_at IS NULL
+"""
+
+CLEAR_OTP_BY_EMAIL: typing.Final[str] = """-- name: ClearOtpByEmail :exec
+UPDATE users
+SET otp = NULL, otp_expires_at = NULL, updated_at = now()
+WHERE email = $1
+    AND isdisabled = false
+    AND deleted_at IS NULL
+"""
+
+CLEAR_OTP_BY_PHONE_NUMBER: typing.Final[str] = """-- name: ClearOtpByPhoneNumber :exec
+UPDATE users
+SET otp = NULL, otp_expires_at = NULL, updated_at = now()
+WHERE phone_number = $1
+    AND isdisabled = false
+    AND deleted_at IS NULL
 """
 
 
@@ -198,47 +230,55 @@ async def get_user(conn: ConnectionLike, *, user_id: int) -> GetUserRow | None:
     row = await conn.fetchrow(GET_USER, user_id)
     if row is None:
         return None
-    return GetUserRow(id_=row[0], email=row[1], created_at=row[2])
+    return GetUserRow(id_=row[0], username=row[1], phone_number=row[2], email=row[3], role=row[4], created_at=row[5])
 
 
 def list_users(conn: ConnectionLike) -> QueryResults[ListUsersRow]:
     def _decode_hook(row: asyncpg.Record) -> ListUsersRow:
-        return ListUsersRow(id_=row[0], username=row[1], phone_number=row[2], email=row[3], created_at=row[4], isdisabled=row[5])
+        return ListUsersRow(id_=row[0], username=row[1], phone_number=row[2], email=row[3], role=row[4], created_at=row[5], isdisabled=row[6])
 
     return QueryResults(conn, LIST_USERS, _decode_hook)
 
 
-async def get_user_by_username(conn: ConnectionLike, *, username: str) -> GetUserByUsernameRow | None:
+async def get_user_by_username(conn: ConnectionLike, *, username: str | None) -> GetUserByUsernameRow | None:
     row = await conn.fetchrow(GET_USER_BY_USERNAME, username)
     if row is None:
         return None
-    return GetUserByUsernameRow(id_=row[0], username=row[1], phone_number=row[2], email=row[3], password_hash=row[4], isdisabled=row[5], deleted_at=row[6])
+    return GetUserByUsernameRow(id_=row[0], username=row[1], phone_number=row[2], email=row[3], password_hash=row[4], role=row[5], isdisabled=row[6], deleted_at=row[7])
 
 
-async def get_user_by_email(conn: ConnectionLike, *, email: str) -> GetUserByEmailRow | None:
+async def get_user_by_email(conn: ConnectionLike, *, email: str | None) -> GetUserByEmailRow | None:
     row = await conn.fetchrow(GET_USER_BY_EMAIL, email)
     if row is None:
         return None
-    return GetUserByEmailRow(id_=row[0], username=row[1], phone_number=row[2], email=row[3], otp=row[4], otp_expires_at=row[5])
+    return GetUserByEmailRow(id_=row[0], username=row[1], phone_number=row[2], email=row[3], password_hash=row[4], role=row[5], isdisabled=row[6], deleted_at=row[7], otp=row[8], otp_expires_at=row[9])
 
 
-async def get_user_by_phone_number(conn: ConnectionLike, *, phone_number: str) -> GetUserByPhoneNumberRow | None:
+async def get_user_by_phone_number(conn: ConnectionLike, *, phone_number: str | None) -> GetUserByPhoneNumberRow | None:
     row = await conn.fetchrow(GET_USER_BY_PHONE_NUMBER, phone_number)
     if row is None:
         return None
-    return GetUserByPhoneNumberRow(id_=row[0], username=row[1], phone_number=row[2], email=row[3], otp=row[4], otp_expires_at=row[5])
+    return GetUserByPhoneNumberRow(id_=row[0], username=row[1], phone_number=row[2], email=row[3], password_hash=row[4], role=row[5], isdisabled=row[6], deleted_at=row[7], otp=row[8], otp_expires_at=row[9])
 
 
-async def create_user(conn: ConnectionLike, *, id_: int, username: str, phone_number: str, email: str, password_hash: str | None) -> int | None:
-    row = await conn.fetchrow(CREATE_USER, id_, username, phone_number, email, password_hash)
+async def create_user(conn: ConnectionLike, *, username: str | None, phone_number: str | None, email: str | None, password_hash: str | None, role: str) -> int | None:
+    row = await conn.fetchrow(CREATE_USER, username, phone_number, email, password_hash, role)
     if row is None:
         return None
     return row[0]
 
 
-async def set_otp_by_email(conn: ConnectionLike, *, otp_code: str | None, otp_expires_at: datetime.datetime | None, email: str) -> None:
+async def set_otp_by_email(conn: ConnectionLike, *, otp_code: str | None, otp_expires_at: datetime.datetime | None, email: str | None) -> None:
     await conn.execute(SET_OTP_BY_EMAIL, otp_code, otp_expires_at, email)
 
 
-async def set_otp_by_phone_number(conn: ConnectionLike, *, otp_code: str | None, otp_expires_at: datetime.datetime | None, phone_number: str) -> None:
+async def set_otp_by_phone_number(conn: ConnectionLike, *, otp_code: str | None, otp_expires_at: datetime.datetime | None, phone_number: str | None) -> None:
     await conn.execute(SET_OTP_BY_PHONE_NUMBER, otp_code, otp_expires_at, phone_number)
+
+
+async def clear_otp_by_email(conn: ConnectionLike, *, email: str | None) -> None:
+    await conn.execute(CLEAR_OTP_BY_EMAIL, email)
+
+
+async def clear_otp_by_phone_number(conn: ConnectionLike, *, phone_number: str | None) -> None:
+    await conn.execute(CLEAR_OTP_BY_PHONE_NUMBER, phone_number)

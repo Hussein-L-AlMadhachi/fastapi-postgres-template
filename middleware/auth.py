@@ -1,12 +1,18 @@
-import os
-
 import jwt
 from starlette.datastructures import Headers
 
+from errors import ErrorCodes
+from lib import config
 from lib.auth import parse_bearer_token
 from lib.response import StandardResponse
-from errors import ErrorCodes
 
+
+PUBLIC_PATHS = {"/", "/openapi.json", "/docs", "/redoc", "/docs/oauth2-redirect"}
+PUBLIC_API_PREFIX = "/api/auth/"
+
+
+def is_public_path(path: str) -> bool:
+    return path in PUBLIC_PATHS or path.startswith(PUBLIC_API_PREFIX)
 
 
 class AuthMiddleware:
@@ -21,25 +27,33 @@ class AuthMiddleware:
         if not (path == "/api" or path.startswith("/api/")):
             return await self.app(scope, receive, send)
 
-        headers = Headers(scope=scope)
-        token = headers.get("Authorization")
-        token = parse_bearer_token(token)
-        if not token:
-            response = StandardResponse(ErrorCodes.UnAuthorized, {"reason":"bad token"}).nolog_error("AuthMiddleware")
-            return await response(scope, receive, send)            
+        if scope["method"] == "OPTIONS" or is_public_path(path):
+            return await self.app(scope, receive, send)
 
-        secret = os.environ.get("APP_SECRET")
-        if not secret:
-            response = StandardResponse(ErrorCodes.TechnicalIssue, {"reason":"no secret configured"}).error("AuthMiddleware")
-            return await response(scope, receive, send)            
+        headers = Headers(scope=scope)
+        token = parse_bearer_token(headers.get("Authorization"))
+        if not token:
+            response = StandardResponse(ErrorCodes.InvalidToken).nolog_error()
+            return await response(scope, receive, send)
+
+        try:
+            secret = config.app_secret()
+        except RuntimeError as exc:
+            response = StandardResponse(ErrorCodes.ServerMisconfigured).error(
+                "AuthMiddleware", exc
+            )
+            return await response(scope, receive, send)
 
         try:
             payload = jwt.decode(token, secret, algorithms=["HS256"])
-        except Exception:
-            response = StandardResponse(ErrorCodes.UnAuthorized, {"reason":"bad token"}).nolog_error("AuthMiddleware")
+        except jwt.PyJWTError:
+            response = StandardResponse(ErrorCodes.InvalidToken).nolog_error()
+            return await response(scope, receive, send)
+
+        if not isinstance(payload, dict) or "user_id" not in payload:
+            response = StandardResponse(ErrorCodes.InvalidToken).nolog_error()
             return await response(scope, receive, send)
 
         scope.setdefault("state", {})["user"] = payload
 
         return await self.app(scope, receive, send)
-

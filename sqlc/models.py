@@ -30,9 +30,9 @@ class Item:
 @dataclasses.dataclass()
 class User:
     id_: int
-    username: str
-    phone_number: str
-    email: str
+    username: str | None
+    phone_number: str | None
+    email: str | None
     role: str
     password_hash: str | None
     otp: str | None

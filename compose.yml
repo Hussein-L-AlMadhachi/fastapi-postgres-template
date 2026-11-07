@@ -8,7 +8,7 @@ services:
     volumes:
       # Postgres 18 mounts the data directory one level higher than 17 and older.
       - pgdata:/var/lib/postgresql
-      - ./migrations:/migrations:ro
+      - ./db/migrations:/migrations:ro
     shm_size: 128mb
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
@@ -21,6 +21,12 @@ services:
     build: .
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-app}
+      APP_SECRET: "${APP_SECRET:?set APP_SECRET in .env (openssl rand -hex 32)}"
+      AUTH_METHODS: "${AUTH_METHODS:-password,email_otp,phone_otp}"
+      AUTH_OTP_AUTO_SIGNUP: "${AUTH_OTP_AUTO_SIGNUP:-true}"
+      OTP_TTL_MINUTES: "${OTP_TTL_MINUTES:-5}"
+      ACCESS_TOKEN_TTL_HOURS: "${ACCESS_TOKEN_TTL_HOURS:-24}"
+      APP_ENV: "${APP_ENV:-prod}"
     ports:
       - "8000:8000"
     depends_on:
