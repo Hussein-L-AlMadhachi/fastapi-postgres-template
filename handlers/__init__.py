@@ -1,6 +1,6 @@
 import middleware
 
-from . import auth, index, users
+from handlers import auth, index, users
 
 
 def attach(app):

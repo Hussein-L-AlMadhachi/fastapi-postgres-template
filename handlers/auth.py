@@ -6,8 +6,8 @@ from db import get_db
 from errors import ErrorCodes
 from lib import config
 from lib.response import StandardResponse
-from model.users import dto
-from model.users.service import UserAlreadyExists, UsersService
+from features.users import model
+from features.users.service import UserAlreadyExists, UsersService
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -19,7 +19,7 @@ def _disabled_method_response(method: str) -> JSONResponse | None:
 
 
 @router.post("/signup")
-async def signup(body: dto.UserSignup, conn: asyncpg.Connection = Depends(get_db)):
+async def signup(body: model.UserSignup, conn: asyncpg.Connection = Depends(get_db)):
     disabled = _disabled_method_response("password")
     if disabled is not None:
         return disabled
@@ -32,7 +32,7 @@ async def signup(body: dto.UserSignup, conn: asyncpg.Connection = Depends(get_db
 
 
 @router.post("/login")
-async def password_login(body: dto.PasswordLogin, conn: asyncpg.Connection = Depends(get_db)):
+async def password_login(body: model.PasswordLogin, conn: asyncpg.Connection = Depends(get_db)):
     disabled = _disabled_method_response("password")
     if disabled is not None:
         return disabled
@@ -44,7 +44,7 @@ async def password_login(body: dto.PasswordLogin, conn: asyncpg.Connection = Dep
 
 
 @router.post("/otp/request")
-async def request_otp(body: dto.OtpRequest, conn: asyncpg.Connection = Depends(get_db)):
+async def request_otp(body: model.OtpRequest, conn: asyncpg.Connection = Depends(get_db)):
     identifier_type, _ = body.identifier()
     disabled = _disabled_method_response(
         "email_otp" if identifier_type == "email" else "phone_otp"
@@ -58,7 +58,7 @@ async def request_otp(body: dto.OtpRequest, conn: asyncpg.Connection = Depends(g
 
 
 @router.post("/otp/login")
-async def otp_login(body: dto.OtpLogin, conn: asyncpg.Connection = Depends(get_db)):
+async def otp_login(body: model.OtpLogin, conn: asyncpg.Connection = Depends(get_db)):
     identifier_type, _ = body.identifier()
     disabled = _disabled_method_response(
         "email_otp" if identifier_type == "email" else "phone_otp"

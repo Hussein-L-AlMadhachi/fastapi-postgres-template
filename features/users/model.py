@@ -86,14 +86,11 @@ class OtpRequest(BaseModel):
 
 
 class OtpLogin(OtpRequest):
-    """OTP login adds the six digit code."""
 
     code: str = Field(min_length=6, max_length=6, pattern=r"^\d{6}$")
 
 
 class UserOut(BaseModel):
-    """The public shape of a user. Only these fields ever reach a client."""
-
     model_config = ConfigDict(from_attributes=True)
 
     id_: int
@@ -105,6 +102,4 @@ class UserOut(BaseModel):
 
 
 class UserListItemOut(UserOut):
-    """Admin listing adds the disabled flag."""
-
     isdisabled: bool
