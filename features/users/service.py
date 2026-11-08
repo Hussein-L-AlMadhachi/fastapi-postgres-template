@@ -61,6 +61,12 @@ async def _find_for_password(
 
 
 
+
+
+
+
+
+
 async def list_all(conn: asyncpg.Connection) -> list[queries.ListUsersRow]:
     rows = await queries.list_users(conn)
     results = [ model.UserListItemOut.model_validate(row) for row in rows ]
