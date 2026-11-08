@@ -7,7 +7,7 @@ from errors import ErrorCodes
 from lib import config
 from lib.response import StandardResponse
 from features.users import model
-from features.users.service import UserAlreadyExists, UsersService
+from features.users import service as users_service
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -25,8 +25,8 @@ async def signup(body: model.UserSignup, conn: asyncpg.Connection = Depends(get_
         return disabled
 
     try:
-        user_id = await UsersService(conn).create(body)
-    except UserAlreadyExists as exc:
+        user_id = await users_service.create(conn, body)
+    except users_service.UserAlreadyExists as exc:
         return StandardResponse(ErrorCodes.UserAlreadyExists).error("signup", exc)
     return StandardResponse("ok", {"id": user_id}).success(201)
 
@@ -37,7 +37,7 @@ async def password_login(body: model.PasswordLogin, conn: asyncpg.Connection = D
     if disabled is not None:
         return disabled
 
-    token = await UsersService(conn).password_login(body)
+    token = await users_service.password_login(conn, body)
     if token is None:
         return StandardResponse(ErrorCodes.InvalidCredentials).nolog_error()
     return StandardResponse("ok", {"token": token}).success()
@@ -52,7 +52,7 @@ async def request_otp(body: model.OtpRequest, conn: asyncpg.Connection = Depends
     if disabled is not None:
         return disabled
  
-    await UsersService(conn).request_otp(body)
+    await users_service.request_otp(conn, body)
     # Always answer the same way so the endpoint cannot be used to enumerate accounts.
     return StandardResponse("ok", {"sent": True}).success()
 
@@ -66,7 +66,7 @@ async def otp_login(body: model.OtpLogin, conn: asyncpg.Connection = Depends(get
     if disabled is not None:
         return disabled
 
-    token = await UsersService(conn).otp_login(body)
+    token = await users_service.otp_login(conn, body)
     if token is None:
         return StandardResponse(ErrorCodes.InvalidOtp).nolog_error()
     return StandardResponse("ok", {"token": token}).success()

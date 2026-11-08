@@ -1,24 +1,26 @@
 # Database
 
-Postgres, `asyncpg`, and **sqlc** for queries. There is no hand-written query
-string anywhere in the app code: SQL lives in `db/queries/*.sql`, and
-`sqlc generate` turns it into typed Python in `sqlc/`.
+Postgres, `asyncpg`, and **sqlc** for queries. No service builds a SQL string:
+SQL lives in `db/queries/*.sql`, and `sqlc generate` turns it into typed Python
+in `sqlc/`.
 
 ## Layout
 
-| Path              | What it is                                                    |
-| ----------------- | ------------------------------------------------------------- |
-| `db/migrations/`  | Plain SQL DDL, applied by hand. Also sqlc's schema source.      |
-| `db/queries/*.sql`| Named queries with sqlc annotations (`:one`, `:many`, `:exec`). |
-| `sqlc/`           | Output of `sqlc generate`. Committed. Never edit by hand.       |
-| `db.py`           | Pool lifecycle only: `connect`, `disconnect`, `pool`, `get_db`. |
+| Path | What it is |
+| --- | --- |
+| `db/migrations/` | Plain SQL DDL, applied by hand. Also sqlc's schema source. |
+| `db/queries/*.sql` | Named queries with sqlc annotations (`:one`, `:many`, `:exec`). |
+| `sqlc/` | Output of `sqlc generate`. Committed. Never edit by hand. |
+| `db.py` | Pool lifecycle: `connect`, `disconnect`, `pool`, `db_context`, `get_db`. |
 
 `schema: "db/migrations"` means every `.sql` file in that directory is parsed
-as schema. Keep new tables there so sqlc can see them.
+as schema, including down migrations. Keep new tables in an up migration there
+so sqlc can see them.
 
 ## The workflow
 
-1. Write the table change in a migration file, e.g. `db/migrations/0002_add_sessions.up.sql`.
+1. Write the table change in a migration file, for example
+   `db/migrations/0002_add_sessions.up.sql`, plus a matching down file.
 2. Write the query in `db/queries/<domain>.sql`:
 
    ```sql
@@ -38,6 +40,7 @@ as schema. Keep new tables there so sqlc can see them.
    with a dataclass per table.
 
 `sqlc vet` runs the same parse pass and catches bad SQL without writing files.
+`sqlc compile` checks the configuration and queries without generating output.
 
 ## Calling generated code
 
@@ -45,47 +48,98 @@ Functions take the connection as the first argument and keyword-only params:
 
 ```python
 import asyncpg
-from fastapi import APIRouter, Depends
 
-from db import get_db
 from sqlc.users import get_user
+
+user = await get_user(conn, user_id=user_id)   # GetUserRow | None
+```
+
+Inside a request, the connection comes from `get_db`. Service functions take
+that connection as their first argument and call the generated functions:
+
+```python
+from db import get_db
+from fastapi import APIRouter, Depends
+from features.users.service import fetch
 
 router = APIRouter()
 
 
 @router.get("/users/{user_id}")
 async def read_user(user_id: int, conn: asyncpg.Connection = Depends(get_db)):
-    user = await get_user(conn, user_id=user_id)   # GetUserRow | None
+    user = await fetch(conn, user_id)
     ...
 ```
 
-The pool itself is opened once by the lifespan in `server.py`; `get_db` borrows
-one connection per request and returns it when the request ends. Nothing in the
-app closes the pool per request.
+## Connection pool
 
-## Things sqlc does to names
+`db.py` owns the pool. `connect()` creates it once, `disconnect()` closes it,
+and repeated `connect()` calls reuse the open pool. `server.py` opens the pool
+in the FastAPI lifespan and closes it on shutdown.
 
-- `id` becomes `id_` on the generated dataclass (`id_ : int`), because `id` is a
-  builtin. Query rows are also suffixed with the query name: `GetUserRow`.
-- Columns keep their SQL types: `decimal` becomes `decimal.Decimal`, `TIMESTAMP`
+`get_db` is the request dependency. It borrows one connection from the pool and
+returns it when the request ends. The pool defaults to `min_size=1` and
+`max_size=10`; `connect` and `db_context` accept overrides for scripts and
+tests. `db_context` opens a throwaway pool when none exists and closes only the
+pool it created.
+
+## Schema
+
+`users` is the only table.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | `bigint identity` | primary key, inserts do not supply it |
+| `username` | `varchar(127)` | nullable, unique |
+| `phone_number` | `varchar(31)` | nullable, unique |
+| `email` | `varchar(511)` | nullable, unique |
+| `role` | `varchar(31)` | not null, defaults to `user` |
+| `password_hash` | `char(100)` | nullable, argon2id is about 98 characters |
+| `otp` | `varchar(12)` | nullable, plain text six digit code |
+| `otp_expires_at` | `timestamp` | nullable |
+| `isdisabled` | `boolean` | not null, defaults to `false` |
+| `created_at` | `timestamp` | defaults to `now()` |
+| `updated_at` | `timestamp` | defaults to `now()`, touched by OTP updates |
+| `deleted_at` | `timestamp` | nullable, soft delete marker |
+
+`users_identity_check` requires at least one of `username`, `email` or
+`phone_number`, which is what lets the same table serve password, email OTP and
+phone OTP accounts. All three identity columns are nullable and unique, so an
+empty value must be stored as `NULL`, not `''`.
+
+Every read query filters `isdisabled = false AND deleted_at IS NULL`. Disabling
+or soft deleting a user therefore hides it from login, `/api/users` and
+`/api/users/me`.
+
+## Generated names
+
+- `id` becomes `id_` on the generated dataclass, because `id` is a builtin.
+- Query rows are suffixed with the query name: `GetUserRow`, `ListUsersRow`,
+  `GetUserByEmailRow`.
+- Columns keep their SQL types: `decimal` becomes `decimal.Decimal`, `timestamp`
   becomes `datetime.datetime`. Pydantic models are not generated; convert in the
-  handler if the response shape differs from the row.
-- A `:one` query that matches nothing returns `None`, not an exception. Check it.
-  A failed statement (bad SQL, dropped connection, constraint violation) raises.
+  handler or service when the response shape differs from the row.
+- A `:one` query that matches nothing returns `None`, not an exception. Check
+  it. A failed statement (bad SQL, dropped connection, constraint violation)
+  raises.
+
+The committed `sqlc/models.py` also contains an `Item` dataclass left over from
+the removed `items` table. It is unused. Run `sqlc generate` to refresh the
+output after a schema change and the stale model disappears.
 
 ## Configuration
 
-`lib/config.py` resolves the DSN: an explicit `dsn` argument, then
-`DATABASE_URL`, then a URL built from `PGHOST`, `PGPORT`, `PGUSER`,
-`PGPASSWORD`, `PGDATABASE`. A `.env` file at the project root is loaded on
-import; real environment variables always win over it.
+`lib/config.py` resolves the DSN: an explicit override, then `DATABASE_URL`,
+then a URL built from `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`.
+A `.env` file at the project root is loaded on import; real environment
+variables win over it.
 
-It also exposes the auth knobs: `app_secret()`, `auth_methods()`,
-`otp_ttl_minutes()`, `access_token_ttl_hours()`, `otp_auto_signup()` and
-`is_dev()`. See [auth.md](auth.md).
+The same module exposes the auth knobs: `app_secret()`, `auth_methods()`,
+`otp_ttl_minutes()`, `access_token_ttl_hours()`, `otp_auto_signup()`,
+`app_env()` and `is_dev()`. The full table is in the [README](../README.md).
 
-`sqlc.yaml` pins the plugin by URL and sha256, so the first `sqlc generate` on a
-new machine downloads the wasm and every later run is offline.
+`sqlc.yaml` pins the Python plugin by URL and sha256, so the first
+`sqlc generate` on a new machine downloads the wasm and later runs are offline.
 
 ## Migrations
 
@@ -96,11 +150,10 @@ psql "$DATABASE_URL" -f db/migrations/0001_init_db.up.sql
 psql "$DATABASE_URL" -f db/migrations/0001_init_db.down.sql
 ```
 
-The down file is for manual resets only; it drops the tables.
+With compose, the same files are mounted at `/migrations`:
 
-`users.id` is a `bigint generated by default as identity primary key`, so
-inserts do not supply an id. `username`, `email` and `phone_number` are
-nullable and unique, with a check constraint requiring at least one of them.
-This is what lets the same table serve password, email OTP and phone OTP
-accounts. `password_hash` is `text` because argon2id hashes are about 98
-characters.
+```bash
+podman compose exec db psql -U postgres -d app -f /migrations/0001_init_db.up.sql
+```
+
+The down file is for manual resets only; it drops `users`.

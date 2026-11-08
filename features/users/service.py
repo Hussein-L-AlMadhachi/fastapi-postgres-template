@@ -25,7 +25,6 @@ class UserAlreadyExists(Exception):
     """Raised when a unique identity column is taken."""
 
 
-
 async def _find_for_otp(
     conn: asyncpg.Connection, identifier_type: model.OtpIdentifierType, value: str
 ) -> queries.GetUserByEmailRow | queries.GetUserByPhoneNumberRow | None:
@@ -34,8 +33,7 @@ async def _find_for_otp(
     return await queries.get_user_by_phone_number(conn, phone_number=value)
 
 
-
-def _generate_token(self, user_id: int, role: str) -> str:
+def _generate_token(user_id: int, role: str) -> str:
     return jwt.encode(
         {
             "user_id": int(user_id),
@@ -45,7 +43,6 @@ def _generate_token(self, user_id: int, role: str) -> str:
         config.app_secret(),
         algorithm="HS256",
     )
-
 
 
 async def _find_for_password(
@@ -65,22 +62,16 @@ async def _find_for_password(
 
 
 
-
-
 async def list_all(conn: asyncpg.Connection) -> list[queries.ListUsersRow]:
-    rows = await queries.list_users(conn)
-    results = [ model.UserListItemOut.model_validate(row) for row in rows ]
-    return results
-
+    return await queries.list_users(conn)
 
 
 async def fetch(conn: asyncpg.Connection, user_id: int) -> queries.GetUserRow | None:
     return await queries.get_user(conn, user_id=user_id)
 
 
-
 async def password_login(conn: asyncpg.Connection, login: model.PasswordLogin) -> str | None:
-    user = await _find_for_password(login)
+    user = await _find_for_password(conn, login)
     if user is None or user.password_hash is None:
         # Run a real verification so a missing account costs the same time.
         verify_password(login.password, dummy_hash)
@@ -98,7 +89,7 @@ async def request_otp(conn: asyncpg.Connection, request: model.OtpRequest) -> bo
     otp_code = f"{secrets.randbelow(1_000_000):06d}"
     otp_expires_at = datetime.now() + timedelta(minutes=config.otp_ttl_minutes())
 
-    user = await _find_for_otp(identifier_type, value)
+    user = await _find_for_otp(conn, identifier_type, value)
     if user is None:
         if not config.otp_auto_signup():
             return False
@@ -134,10 +125,9 @@ async def request_otp(conn: asyncpg.Connection, request: model.OtpRequest) -> bo
     return True
 
 
-
 async def otp_login(conn: asyncpg.Connection, login: model.OtpLogin) -> str | None:
     identifier_type, value = login.identifier()
-    user = await _find_for_otp(identifier_type, value)
+    user = await _find_for_otp(conn, identifier_type, value)
 
     if user is None or user.otp is None or user.otp_expires_at is None:
         return None
@@ -154,8 +144,7 @@ async def otp_login(conn: asyncpg.Connection, login: model.OtpLogin) -> str | No
     return _generate_token(user.id_, user.role)
 
 
-async def create(conn: asyncpg.Connection , user: model.UserSignup) -> int:
-
+async def create(conn: asyncpg.Connection, user: model.UserSignup) -> int:
     try:
         user_id = await queries.create_user(
             conn,

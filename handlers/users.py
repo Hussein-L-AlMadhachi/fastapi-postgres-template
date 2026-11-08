@@ -23,6 +23,6 @@ async def list_users(request: Request, conn: asyncpg.Connection = Depends(get_db
     if request.state.user.get("role") != "admin":
         return StandardResponse(ErrorCodes.AdminRequired).nolog_error()
 
-    rows = await users_service.list_all()
+    rows = await users_service.list_all(conn)
     users = [UserListItemOut.model_validate(row) for row in rows]
     return StandardResponse("ok", users).success()
